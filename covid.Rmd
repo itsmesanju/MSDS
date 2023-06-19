@@ -1,0 +1,168 @@
+## Install required packages (if not already installed in the system)
+install.packages(c("tidyverse", "ggplot2", "reshape2", "forecast", "lubridate"))
+
+## Load required packages
+library(tidyverse)
+library(ggplot2)
+library(reshape2)
+library(forecast)
+library(lubridate)
+
+## Defining the default URL for the repo
+url_in = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/"
+## Files contains the list of CSV
+files = c( "time_series_covid19_confirmed_global.csv",  "time_series_covid19_deaths_global.csv")
+urls = str_c(url_in, files)
+
+global_cases = read_csv(urls[1])
+global_deaths = read_csv(urls[2])
+
+### Cleaning the global cases
+global_cases <- global_cases %>%
+  pivot_longer(cols = -c ('Province/State',
+                          'Country/Region', Lat, Long),
+                names_to = "date",
+                values_to = "cases") %>%
+  select(-c(Lat, Long))
+
+
+### Cleaning the global deaths
+global_deaths <- global_deaths %>%
+  pivot_longer(cols = -c ('Province/State',
+                          'Country/Region', Lat, Long),
+                names_to = "date",
+                values_to = "deaths") %>%
+  select(-c(Lat, Long))
+
+## Join the global data in one object for further analysis and visualization
+global <- global_cases %>%
+  full_join(global_deaths) %>%
+  rename(Country_Region = 'Country/Region',
+         Province_State = 'Province/State') %>%
+  mutate(date = mdy(date))
+
+## Keep data with the positive cases only
+global <- global %>% filter(cases > 0)
+
+## There  is file in the repo which contains the population as well. We can join the entire data together.
+uid_lookup_url <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/UID_ISO_FIPS_LookUp_Table.csv"
+uid <- read_csv(uid_lookup_url) %>%
+  select(-c(Lat, Long_, Combined_Key, code3, iso2, iso3, Admin2))
+  
+## Join the UID data with global
+global <- global %>%
+  left_join(uid, by = c("Province_State", "Country_Region")) %>%
+  select(-c(UID, FIPS)) %>%
+  select(Province_State, Country_Region, date, cases, deaths, Population)
+  
+
+## Now we have covid-19 data available globally. We can analyze, plot, visualize or model this data.
+  
+## Visualization -1 => Time series analysis for global cases
+global_ts <- global %>%
+  group_by(date) %>%
+  summarise(total_cases = sum(cases)) %>%
+  ungroup() %>%
+  select(date, total_cases)
+
+## Visualize time series of global cases
+ggplot(global_ts, aes(x = date, y = total_cases)) +
+  geom_line() +
+  labs(title = "Global COVID-19 Cases Over Time",
+       x = "Date", y = "Total Cases")
+       
+## Visualization -2 => Time series analysis for global deaths
+global_deaths_ts <- global %>%
+  group_by(date) %>%
+  summarise(total_deaths = sum(deaths)) %>%
+  ungroup() %>%
+  select(date, total_deaths)
+
+## Visualize time series of global deaths
+ggplot(global_deaths_ts, aes(x = date, y = total_deaths)) +
+  geom_line() +
+  labs(title = "Global COVID-19 Deaths Over Time",
+       x = "Date", y = "Total Deaths")
+
+## Visualization -3 => Calculate daily new cases
+global_daily_cases <- global_ts %>%
+  mutate(daily_new_cases = total_cases - lag(total_cases, default = 0))
+
+## Visualize daily new cases
+ggplot(global_daily_cases, aes(x = date, y = daily_new_cases)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(title = "Daily New COVID-19 Cases",
+       x = "Date", y = "Daily New Cases")
+
+## Visualization 4 => Select top countries with the highest number of cases
+top_countries <- global %>%
+  group_by(Country_Region) %>%
+  summarise(total_cases = max(cases)) %>%
+  arrange(desc(total_cases)) %>%
+  top_n(10)
+
+## Visualize the top countries
+ggplot(top_countries, aes(x = reorder(Country_Region, -total_cases), y = total_cases)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(title = "Top Countries with Highest COVID-19 Cases",
+       x = "Country", y = "Total Cases") +
+  coord_flip()
+  
+### Analysis of correlation between cases and deaths. Here I am trying to analyze whether COVID-19 deaths increased with the number of cases, you can calculate the correlation between the number of cases and the number of deaths over time. A positive correlation would indicate that as the number of cases increased
+correlation <- global %>%
+  group_by(date) %>%
+  summarize(correlation = cor(cases, deaths))
+
+## Plot correlation over time
+ggplot(correlation, aes(x = date, y = correlation)) +
+  geom_line() +
+  labs(x = "Date", y = "Correlation") +
+  ggtitle("Correlation between COVID-19 Cases and Deaths") +
+  theme_minimal()
+
+
+## The another analysis is attempted to check if chance of death due to covid has changed over time. This analysis will help us understand if the severity of the disease, as indicated by the death rate, has varied over the course of the pandemic. 
+
+## Calculate COVID-19 death rate
+death_rate <- global %>%
+  group_by(date) %>%
+  summarize(death_rate = sum(deaths) / sum(cases) * 100)
+
+## Plot death rate over time
+ggplot(death_rate, aes(x = date, y = death_rate)) +
+  geom_line() +
+  labs(x = "Date", y = "COVID-19 Death Rate (%)") +
+  ggtitle("COVID-19 Death Rate Over Time") +
+  theme_minimal()
+
+  
+## Modeling with ARIMA
+## Time series analysis for global cases
+global_ts <- global %>%
+  group_by(date) %>%
+  summarise(total_cases = sum(cases)) %>%
+  ungroup() %>%
+  select(date, total_cases)
+
+## Fit an ARIMA model
+model <- auto.arima(global_ts$total_cases)
+
+### Forecast future cases
+forecast <- forecast(model, h = 30)  # Forecasting for the next 30 days
+
+### Plot the actual and forecasted cases
+plot(forecast, xlab = "No of Days", ylab = "Total of Covidd Cases",
+     main = "Forecast of Global COVID-19 Cases (ARIMA Model)")
+
+## Analyze the forecast accuracy
+accuracy <- accuracy(forecast)
+print(accuracy)
+
+
+## Bias
+There could be multiple sources of bias in the COVID19 data:
+
+- The data collection is likely biased since this data is collected over many jurisdictions with possibly different rules of reporting.
+- The data also spans a time window that 2 years where data collection process may not be uniform.
+- There is no data on other factors beyond cases and population that may impact the death rate from COVID19.
+
