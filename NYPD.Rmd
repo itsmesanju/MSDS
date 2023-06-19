@@ -1,0 +1,66 @@
+# Load required libraries
+library(tidyverse)
+
+# Set the URL for the CSV file
+csv_url <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+
+# Read the CSV file
+df <- read_csv(csv_url)
+
+# Clean and preprocess the data
+df <- df %>%
+  # Drop unnecessary columns
+  select(-c(STATISTICAL_MURDER_FLAG, LOC_OF_OCCUR_DESC, JURISDICTION_CODE, LOC_CLASSFCTN_DESC, LOCATION_DESC)) %>%
+  # Convert date and time columns to appropriate types
+  mutate(OCCUR_DATE = as.Date(OCCUR_DATE, format = "%m/%d/%Y"),
+         OCCUR_TIME = str_pad(OCCUR_TIME, width = 4, pad = "0"),
+         OCCUR_TIME = parse_time(as.character(OCCUR_TIME), format = "%H%M")) %>%
+  # Clean up column names
+  setNames(make.names(names(.), unique = TRUE))
+
+# Explore the cleaned dataset
+head(df)       # View the first few rows
+glimpse(df)    # Get an overview of the data structure
+summary(df)    # Summary statistics
+
+# Analyze the data
+# Conduct exploratory data analysis (EDA) and create visualizations
+# Here are two example visualizations
+
+# Visualization 1: Bar plot of incidents by borough
+df %>%
+  group_by(BORO) %>%
+  summarize(IncidentCount = n()) %>%
+  ggplot(aes(x = BORO, y = IncidentCount, fill = BORO)) +
+  geom_bar(stat = "identity") +
+  scale_fill_brewer(palette = "Set3") +
+  labs(x = "Borough", y = "Incident Count", title = "Incidents by Borough")
+
+
+# Visualization 2: Time series plot of incidents by year
+df %>%
+  mutate(Year = lubridate::year(OCCUR_DATE)) %>%
+  group_by(Year) %>%
+  summarize(IncidentCount = n()) %>%
+  ggplot(aes(x = Year, y = IncidentCount)) +
+  geom_line() +
+  labs(x = "Year", y = "Incident Count", title = "Incidents by Year")
+  
+df %>%
+  group_by(PERP_RACE, VIC_AGE_GROUP) %>%
+  summarize(IncidentCount = n()) %>%
+  ggplot(aes(x = VIC_AGE_GROUP, y = IncidentCount, fill = PERP_RACE)) +
+  geom_bar(stat = "identity", position = "dodge", color = "black") +
+  labs(x = "Victim Age Group", y = "Incident Count", title = "Shooting Incidents by Perpetrator Race and Victim Age Group", fill = "Perpetrator Race") +
+  scale_fill_manual(values = c("Black" = "steelblue", "White" = "skyblue", "Other" = "gray"))
+
+
+# Convert age groups to logical vectors
+df$PERP_AGE_GROUP <- ifelse(df$PERP_AGE_GROUP == "18-24", TRUE, FALSE)
+df$VIC_AGE_GROUP <- ifelse(df$VIC_AGE_GROUP == "18-24", TRUE, FALSE)
+
+# Perform linear regression
+linear_model <- lm(VIC_AGE_GROUP ~ PERP_AGE_GROUP, data = df)
+
+# Print the model summary
+summary(linear_model)
